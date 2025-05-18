@@ -1,0 +1,6 @@
+# /etc/cron.d/certbot-cron
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 환경 변수로 설정 가능한 인증서 갱신 일정
+${CERT_RENEWAL_MIN:-45} ${CERT_RENEWAL_HOUR:-0} * * ${CERT_RENEWAL_DAYS:-1,5} root /usr/local/bin/renew-certs.sh > /var/log/certbot-renew.log 2>&1
