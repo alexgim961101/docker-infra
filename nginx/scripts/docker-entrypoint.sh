@@ -3,7 +3,6 @@ set -e
 
 # 기본값 설정
 export DOMAIN_NAME="${DOMAIN_NAME:-localhost}"
-export SSL_ENABLED="${SSL_ENABLED:-false}"
 export CERT_RENEWAL_DAYS="${CERT_RENEWAL_DAYS:-1,5}"
 export CERT_RENEWAL_HOUR="${CERT_RENEWAL_HOUR:-0}"
 export CERT_RENEWAL_MIN="${CERT_RENEWAL_MIN:-45}"
@@ -16,25 +15,34 @@ export DEFAULT_WEBSOCKET="${DEFAULT_WEBSOCKET:-false}"
 envsubst < /etc/cron.d/certbot-cron.template > /etc/cron.d/certbot-cron
 chmod 0644 /etc/cron.d/certbot-cron
 
-# Nginx 기본 설정 파일 생성
-envsubst < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
-
 # SSL이 활성화된 경우 인증서 발급 처리 함수
 handle_ssl_certificates() {
-  if [ "$SSL_ENABLED" = "true" ]; then
-    # Docker API를 통해 VIRTUAL_HOST 환경 변수를 가진 컨테이너 찾기
-    domains=$(curl --unix-socket /var/run/docker.sock -s http://localhost/containers/json | \
-              jq -r '.[] | select(.Env | contains("VIRTUAL_HOST")) | .Env[] | select(startswith("VIRTUAL_HOST=")) | split("=")[1] | split(",")[]' | sort | uniq)
-    
-    for domain in $domains; do
-      if [ ! -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]; then
-        echo "SSL certificate not found for $domain, requesting..."
-        certbot --nginx --non-interactive --agree-tos -m "$CERT_EMAIL" -d "$domain"
-      else
-        echo "SSL certificate already exists for $domain"
-      fi
-    done
+  # Docker API를 통해 실행 중인 컨테이너의 VIRTUAL_HOST와 VIRTUAL_HOST_SSL 환경 변수에서 도메인 목록을 가져옵니다
+  domains=$(curl --unix-socket /var/run/docker.sock -s http://localhost/containers/json | \
+            jq -r '.[].Id' | \
+            while read container_id; do
+              # 컨테이너의 환경 변수 정보를 가져옵니다
+              container_info=$(curl --unix-socket /var/run/docker.sock -s "http://localhost/containers/$container_id/json")
+              
+              # VIRTUAL_HOST_SSL이 true인 도메인만 선택
+              virtual_hosts=$(echo "$container_info" | jq -r '.Config.Env[] | select(startswith("VIRTUAL_HOST=")) | sub("^VIRTUAL_HOST="; "") | split(",")[]')
+              ssl_enabled=$(echo "$container_info" | jq -r '.Config.Env[] | select(startswith("VIRTUAL_HOST_SSL=")) | sub("^VIRTUAL_HOST_SSL="; "")')
+              
+            done | sort | uniq)
+  
+  # 도메인 목록이 비어있는지 확인
+  if [ -z "$domains" ]; then
+      echo "Warning: No domains with SSL enabled found in running containers"
   fi
+  
+  for domain in $domains; do
+    if [ ! -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]; then
+      echo "SSL certificate not found for $domain, requesting..."
+      certbot --nginx --non-interactive --agree-tos -m "$CERT_EMAIL" -d "$domain"
+    else
+      echo "SSL certificate already exists for $domain"
+    fi
+  done
 }
 
 # docker-gen을 통해 설정 파일 생성 및 갱신 함수
@@ -59,5 +67,6 @@ setup_docker_gen
 echo "Testing Nginx configuration..."
 nginx -t
 
+echo "Starting Nginx..."
 # 기본 명령 실행
 exec "$@"

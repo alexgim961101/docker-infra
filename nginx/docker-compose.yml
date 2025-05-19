@@ -1,0 +1,30 @@
+services:
+  nginx:
+    image: nginx:local
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: always
+  
+  frontend:
+    image: nginx:latest
+    container_name: frontend
+    environment:
+      - VIRTUAL_HOST=abc.example.com
+      - VIRTUAL_PORT=3333
+      - VIRTUAL_HOST_SSL=true
+      - VIRTUAL_HOST_LOCATION=/
+
+
+  backend:
+    image: nginx:latest
+    container_name: backend
+    environment:
+      - VIRTUAL_HOST=abc.example.com
+      - VIRTUAL_PORT=3334
+      - VIRTUAL_HOST_SSL=true
+      - VIRTUAL_HOST_LOCATION=/example
+
